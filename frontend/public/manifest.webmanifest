@@ -1,0 +1,13 @@
+{
+  "name": "ParkHooshmand — پارک هوشمند",
+  "short_name": "پارک هوشمند",
+  "description": "Real-time parking availability and demand-responsive pricing.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#05070d",
+  "theme_color": "#05070d",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

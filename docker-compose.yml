@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    container_name: sfpark-backend
+    restart: unless-stopped
+    ports:
+      - "8090:8000"
+    environment:
+      - TZ=Asia/Tehran
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8090}
+    container_name: sfpark-frontend
+    restart: unless-stopped
+    ports:
+      - "3200:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}
+      - TZ=Asia/Tehran
+    depends_on:
+      - backend
