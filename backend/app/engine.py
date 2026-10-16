@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import math
-import random
+import random  # simulation noise only, never used for secrets
+import secrets
 import time
-import uuid
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 
 from .data import EVENT_SEED, POLICY, ZONE_SEED
@@ -40,8 +41,8 @@ class Zone:
         self.rate = rate
         self.x, self.y = x, y
         self.sensors = capacity
-        self.sensors_online = capacity - random.randint(0, max(1, capacity // 90))
-        self.appeal = random.uniform(0.82, 1.18)
+        self.sensors_online = capacity - random.randint(0, max(1, capacity // 90))  # nosec B311
+        self.appeal = random.uniform(0.82, 1.18)  # nosec B311
         self.occupied = int(capacity * 0.5)
         self.history: list[dict] = []
         self.rate_changes: list[dict] = []
@@ -62,7 +63,7 @@ class Zone:
     def _seed_history(self):
         t = now() - timedelta(hours=23)
         for _ in range(24):
-            occ = self.target_occupancy(t) * random.uniform(0.94, 1.06)
+            occ = self.target_occupancy(t) * random.uniform(0.94, 1.06)  # nosec B311
             occ = max(0.02, min(0.99, occ))
             self.history.append(
                 {
@@ -80,7 +81,7 @@ class Zone:
     def tick(self, at: datetime):
         target = self.target_occupancy(at)
         cur = self.occupied / self.capacity
-        cur += (target - cur) * 0.18 + random.uniform(-0.012, 0.012)
+        cur += (target - cur) * 0.18 + random.uniform(-0.012, 0.012)  # nosec B311
         self.occupied = int(max(0, min(self.capacity, round(cur * self.capacity))))
         self.revenue_today += self.occupied * self.rate / 3600 * 5 / 1000
 
@@ -177,9 +178,8 @@ class Zone:
 
 
 EVENTS: list[dict] = []
+_EVENT_WINDOWS: dict[str, tuple[datetime, datetime]] = {}  # parsed once, not on every tick
 ZONES: dict[str, Zone] = {}
-SESSIONS: dict[str, dict] = {}
-WALLET = {"balance": 480000, "currency": "IRT"}
 _started = time.time()
 
 
@@ -188,6 +188,7 @@ def _init_events():
     for e in EVENT_SEED:
         start = base + timedelta(minutes=e["starts_in_min"])
         end = start + timedelta(minutes=e["duration_min"])
+        _EVENT_WINDOWS[e["id"]] = (start, end)
         EVENTS.append(
             {
                 "id": e["id"],
@@ -202,7 +203,10 @@ def _init_events():
 
 
 def boot():
-    random.seed(1387)
+    random.seed(1387)  # nosec B311
+    EVENTS.clear()
+    _EVENT_WINDOWS.clear()
+    ZONES.clear()
     _init_events()
     for s in ZONE_SEED:
         z = Zone(s)
@@ -213,8 +217,9 @@ def boot():
 def refresh_events():
     t = now()
     for ev in EVENTS:
-        ev["active"] = datetime.fromisoformat(ev["start"]) <= t <= datetime.fromisoformat(ev["end"])
-        ev["starts_in_min"] = int((datetime.fromisoformat(ev["start"]) - t).total_seconds() // 60)
+        start, end = _EVENT_WINDOWS[ev["id"]]
+        ev["active"] = start <= t <= end
+        ev["starts_in_min"] = int((start - t).total_seconds() // 60)
 
 
 _last_reprice = 0.0
@@ -234,6 +239,10 @@ def tick() -> dict:
             if c:
                 changes.append({"zone": z.id, **c})
     return {"t": at.isoformat(), "zones": [z.brief() for z in ZONES.values()], "rate_changes": changes}
+
+
+def uptime() -> int:
+    return int(time.time() - _started)
 
 
 def overview() -> dict:
@@ -265,17 +274,97 @@ def overview() -> dict:
         "co2_saved_kg": round(caps * 0.021 * (1.05 - occ / caps), 1),
         "curve": curve,
         "active_events": [e for e in EVENTS if e["active"]],
-        "uptime_s": int(time.time() - _started),
+        "uptime_s": uptime(),
         "updated_at": now().isoformat(),
     }
 
 
-def start_session(zone_id: str, plate: str, minutes: int) -> dict:
-    z = ZONES[zone_id]
-    at = now()
+# ---------- accounts, wallet and sessions ----------
+# Every browser/device gets an anonymous account behind an unguessable bearer token.
+# All mutation below runs on the event loop (the API handlers are async and never await
+# in between check and update), so a balance check and its deduction cannot interleave.
+# ponytail: in-memory store bounded by LRU eviction; move to a database for real money.
+
+DEMO_BALANCE = 480_000
+MAX_BALANCE = 5_000_000
+MAX_ACCOUNTS = 10_000
+MAX_ACTIVE_SESSIONS = 3
+MAX_KEPT_SESSIONS = 20
+
+ACCOUNTS: "OrderedDict[str, dict]" = OrderedDict()  # token -> {"balance", "currency", "sessions"}
+SESSIONS: dict[str, dict] = {}
+
+
+class Rejected(Exception):
+    """A business rule refused the request; status is the HTTP status to return."""
+
+    def __init__(self, status: int, detail: str):
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+
+
+def session_cost(rate: int, minutes: int) -> int:
+    """One rounding rule (floor), mirrored by the frontend's sessionCost()."""
+    return rate * minutes // 60
+
+
+def wallet_view(acct: dict) -> dict:
+    return {"balance": acct["balance"], "currency": acct["currency"]}
+
+
+def create_account() -> tuple[str, dict]:
+    token = secrets.token_urlsafe(32)
+    acct = {"balance": DEMO_BALANCE, "currency": "IRT", "sessions": []}
+    ACCOUNTS[token] = acct
+    while len(ACCOUNTS) > MAX_ACCOUNTS:
+        _, old = ACCOUNTS.popitem(last=False)
+        for sid in old["sessions"]:
+            SESSIONS.pop(sid, None)
+    return token, acct
+
+
+def get_account(token: str) -> dict | None:
+    acct = ACCOUNTS.get(token)
+    if acct is not None:
+        ACCOUNTS.move_to_end(token)
+    return acct
+
+
+def _expire(acct: dict) -> None:
+    t = now()
+    for sid in acct["sessions"]:
+        s = SESSIONS[sid]
+        if s["status"] == "active" and datetime.fromisoformat(s["end"]) <= t:
+            s["status"] = "finished"
+
+
+def list_sessions(acct: dict) -> list[dict]:
+    _expire(acct)
+    return [SESSIONS[sid] for sid in reversed(acct["sessions"])]
+
+
+def topup(acct: dict, amount: int) -> dict:
+    acct["balance"] = min(MAX_BALANCE, acct["balance"] + amount)
+    return wallet_view(acct)
+
+
+def start_session(acct: dict, zone_id: str, plate: str, minutes: int) -> dict:
+    z = ZONES.get(zone_id)
+    if z is None:
+        raise Rejected(404, "zone not found")
+    if z.free <= 0:
+        raise Rejected(409, "zone is full")
+    _expire(acct)
+    if sum(SESSIONS[sid]["status"] == "active" for sid in acct["sessions"]) >= MAX_ACTIVE_SESSIONS:
+        raise Rejected(409, "too many active sessions")
     rate = z.effective_rate()
-    cost = int(rate * minutes / 60)
-    sid = "PK-" + uuid.uuid4().hex[:8].upper()
+    cost = session_cost(rate, minutes)
+    if cost > acct["balance"]:
+        raise Rejected(402, "insufficient wallet balance")
+    acct["balance"] -= cost
+    at = now()
+    sid = "PK-" + secrets.token_urlsafe(12)
     s = {
         "id": sid,
         "zone_id": z.id,
@@ -284,22 +373,32 @@ def start_session(zone_id: str, plate: str, minutes: int) -> dict:
         "minutes": minutes,
         "rate": rate,
         "cost": cost,
+        "refund": 0,
         "start": at.isoformat(),
         "end": (at + timedelta(minutes=minutes)).isoformat(),
         "status": "active",
     }
-    WALLET["balance"] -= cost
-    z.occupied = min(z.capacity, z.occupied + 1)
+    # Paid sessions do not touch sensor occupancy: pricing must follow what sensors measure,
+    # otherwise buying sessions could push a zone's demand-responsive price around.
     SESSIONS[sid] = s
+    acct["sessions"].append(sid)
+    extra = len(acct["sessions"]) - MAX_KEPT_SESSIONS
+    if extra > 0:
+        for old in [x for x in acct["sessions"] if SESSIONS[x]["status"] != "active"][:extra]:
+            acct["sessions"].remove(old)
+            SESSIONS.pop(old, None)
     return s
 
 
-def stop_session(sid: str) -> dict:
+def stop_session(acct: dict, sid: str) -> dict:
+    if sid not in acct["sessions"]:  # someone else's id looks exactly like a missing one
+        raise Rejected(404, "session not found")
+    _expire(acct)
     s = SESSIONS[sid]
     if s["status"] == "active":
-        s["status"] = "finished"
-        s["end"] = now().isoformat()
-        z = ZONES.get(s["zone_id"])
-        if z:
-            z.occupied = max(0, z.occupied - 1)
+        at = now()
+        unused_s = max(0.0, (datetime.fromisoformat(s["end"]) - at).total_seconds())
+        refund = min(s["cost"], int(s["rate"] * unused_s // 3600))
+        acct["balance"] += refund
+        s.update(status="finished", end=at.isoformat(), refund=refund)
     return s

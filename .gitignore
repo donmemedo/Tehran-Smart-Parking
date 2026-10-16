@@ -6,3 +6,6 @@ __pycache__/
 
 Docs
 .idea
+.pytest_cache/
+graphify-out/cache/
+graphify-out/graph.html
