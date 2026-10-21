@@ -1,13 +1,13 @@
 # LAST_Report: security, performance and UX hardening of ParkHooshmand
 
 Project: ParkHooshmand / Tehran Smart Parking (FastAPI backend, Next.js 15 frontend).
-Branch: `security/red-blue-team-hardening`. Written 2026-10-16.
+Branch: `security/red-blue-team-hardening`. Last updated 2026-10-22.
 
 ## 1. Bottom line
 
 - **Backend is done and tested.** All 15 backend findings are fixed and checked live. 27 security regression tests pass. `pip-audit` and `bandit` report nothing.
 - **Dependencies are patched.** Next.js 15.5.4 is now 15.5.28. FastAPI 0.115.6 / Starlette 0.41.3 are now 0.143.1 / 1.8.0.
-- **Frontend hardening and the Apple-style UX pass are `<!--FRONTEND-->` (see section 5).**
+- **Frontend hardening and the Apple-style UX pass are implemented, type-checked, built and tested end to end against the new backend** (section 5). They were **not tried in a browser**, and the Docker stack was **not run**, so gestures, animation feel and the proxy container are unverified.
 - **Not everything you asked for was done.** Section 7 lists what was skipped and why. The main causes are repeated usage limits and an AI-safety interruption of some replies.
 - A pull request is open on a new branch. Nothing was merged to `main`.
 
@@ -16,9 +16,10 @@ Branch: `security/red-blue-team-hardening`. Written 2026-10-16.
 | When | What happened |
 | --- | --- |
 | 2026-10-02 | A previous session read every backend and frontend file and ran `npm audit`, `pip-audit` and `bandit`. It wrote `SESSION_HANDOFF.md` with 38 findings (B1-B15 backend, F1-F9 frontend and infra, P1-P5 performance, U1-U9 UX). No code was changed. |
-| 2026-10-08 | This session started on `main`, created the branch, and built the graphify knowledge graph (246 nodes, 453 edges, 13 communities). It confirmed the main backend findings against the unmodified server. |
+| 2026-10-08 | This session started on `main`, created the branch, and built the graphify knowledge graph (246 nodes at first, 417 nodes, 820 edges and 20 communities after the changes). It confirmed the main backend findings against the unmodified server. |
 | 2026-10-15 | Dependencies upgraded. Backend rewritten for identity, per-device wallets, rate limits, validation and safe WebSockets. Tests, CI and containers added. |
-| 2026-10-16 | Frontend workflow relaunched after its first run failed on a usage limit and produced only one file. Report, attack tree and PR written. |
+| 2026-10-16 | Frontend workflow relaunched after its first run failed on a usage limit and produced only one file. Report, attack tree and draft PR written. |
+| 2026-10-22 | A weekly usage limit stopped the second frontend run partway. The security half had landed. I finished the UX half's loose ends, ran two independent code reviews, fixed what they found, rebuilt, ran the whole thing end to end, and finalised the PR. |
 
 ## 3. Live pentest on the project's own server (before and after)
 
@@ -68,7 +69,71 @@ Caveat that matters: B8 relies on running one worker process. With several worke
 
 ## 5. Frontend, infrastructure and UX
 
-<!--FRONTEND_SECTION-->
+What was done, how it was checked, and what was not.
+
+**Checked:** `tsc` is clean. The production build passes (home page 129 kB of first-load JavaScript). `npm audit` reports 0. The built frontend ran against the new backend and passed every check below. Two independent Sonnet reviewers read all of the frontend changes.
+
+| End-to-end check (frontend on a local port, proxying to the new backend) | Result |
+| --- | --- |
+| Page loads, Persian and right-to-left set | 200, `lang="fa" dir="rtl"` |
+| Security headers on pages | CSP, HSTS, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options: DENY`, COOP all present; no `X-Powered-By` |
+| API through the frontend | 200; identity token issued; wallet readable with it |
+| Markup in a plate, through the proxy | 422 |
+| Backend `/docs` through the frontend | 404 (hidden) |
+| Service worker headers | `no-cache`, `Service-Worker-Allowed: /` |
+| Fonts | no Google Fonts reference; Vazirmatn and Inter served from `/_next/static/media` |
+| Live feed WebSocket through the frontend | frame received with 16 zones |
+
+**Not checked:** no browser or Playwright exists on this machine, so touch gestures, the spring sheet, focus trap, right-to-left slide direction, reduced-motion paths and real Lighthouse numbers were verified only by code reading. Docker Desktop was not running, so the compose stack and the Caddy config were validated only with `docker compose config`.
+
+| ID | Item | Status |
+| --- | --- | --- |
+| F1 | Vulnerable Next.js | Fixed. 15.5.28 plus overrides for postcss, sharp and source-map-js. |
+| F2 | No security headers or CSP | Fixed and verified in responses. `script-src` keeps `'unsafe-inline'`, a documented trade-off. |
+| F3 | Google Fonts at runtime | Fixed. Fonts are self-hosted with their licences. |
+| F4 | Service worker caches everything | Fixed in code: versioned cache, only clean same-origin 200 responses, bounded, network-first pages. Not tested in a browser. |
+| F5 | `window.__API__` override | Removed. |
+| F6 | Mixed content and a baked API address | Fixed. Everything is same-origin through one proxy. |
+| F7 | Containers | Hardened in the files: non-root, read-only, no capabilities, limits, strict `npm ci`, loopback publish only. Not run. |
+| F8 | Unchecked socket frames | Fixed. Frames are size-capped, parsed safely and field-validated; a global error page catches render errors. |
+| F9 | `rel="noreferrer"` only | Fixed. |
+| P1 | One context re-rendered everything on each frame | Fixed. Preferences are separate from a live store read with selectors. The reviewer traced every component's subscriptions and confirmed Header, Hero and Footer do not re-render on frames. |
+| P2 | Observer rebuilt on every render | Fixed. |
+| P3 | Whole pages are client components | **Not done.** Server-rendered static sections remain a follow-up. |
+| P4 | Polling on top of the socket | Fixed. No polling while live, pauses in hidden tabs, a watchdog reconnects a silent socket. |
+| U1 | Sheet not interruptible | Implemented: spring physics, drag with velocity hand-off, momentum projection, rubber-banding, exit along the entry path. Not tried in a browser. |
+| U2 | Dialog accessibility | Implemented: labelled dialog, focus trap, focus restore, Escape, scroll lock. |
+| U3 | Silent default plate, raw errors | Implemented: inline validation, a review step before paying, translated errors for every status. |
+| U4 | English-only labels | Fixed. |
+| U5 | `transition-all` and hard header border | Fixed. |
+| U6 | Endless drifting background | Fixed. Static. |
+| U7 | Reduced transparency and contrast | Fixed. |
+| U8 | Letter-spacing | Fixed. Persian stays at zero. |
+| U9 | «جست‌وجو» wording | Fixed to «جستجو» across the app and README. |
+
+**Findings from the two independent reviews, all verified before fixing:**
+
+| Finding | Result |
+| --- | --- |
+| Next's proxy hop forwards a client-supplied `X-Forwarded-For`, so a visitor could forge their rate-limit identity | Fixed with a Caddy entry proxy that overwrites the header; the backend trusts only the proxy's address |
+| Pinned Docker subnet clashed with this host's Docker networks | Fixed. `10.89.28.0/24`, configurable |
+| Forwarded headers trusted from any address in the Dockerfile (also raised by an automated commit review) | Fixed |
+| Third-party GitHub Actions pinned by tag only (automated commit review) | Fixed. Pinned to commit SHAs |
+| Offline fallback served install-time HTML | Fixed |
+| Two browser tabs could create two accounts | Fixed with a cross-tab lock |
+| CSP upgrade option could not be set through compose | Fixed. Defaults to off for local HTTP |
+| Concurrency cap equal to the WebSocket cap | Fixed. 1500 against 1000 |
+| Dashboard numbers froze while the socket was live | Fixed. 30 second refresh |
+| A silent half-open socket kept saying "live" | Fixed with a 15 second watchdog |
+| A malformed frame could crash rendering | Fixed. Field validation and an error page |
+| Sheet reopened on the wrong page after Back | Fixed |
+| Focus lost after paying | Fixed |
+| Enter did nothing in an invalid plate field | Fixed |
+| Missing scroll-edge style, unhandled rejection, contrast on the accent colour, English-only endpoint text, empty state before load, stale offline poll, chart accessibility and animation | Fixed |
+| Language flash for English users on first paint | Not fixed. Needs a cookie, design limit |
+| Sheet does not re-measure on rotation while open | Not fixed. Cosmetic |
+| Selection colour and header logo still use dark text on the accent in high-contrast light mode | Not fixed |
+| Hover lift still applies to a disabled-looking primary button | Not fixed |
 
 ## 6. Performance of the security layer
 
@@ -84,11 +149,16 @@ That is roughly 0.02 milliseconds per request. Other design choices that save wo
 
 A first attempt to cache IP parsing gave no measurable gain, so it was removed.
 
+Frontend: the home page ships 129 kB of first-load JavaScript. Socket frames no longer re-render the header, hero or footer. Polling stops while the socket is live and while a tab is hidden. Fonts are served from the same origin instead of Google. The background no longer animates.
+
 ## 7. Not done, skipped, or limited
 
 | Item | Why |
 | --- | --- |
-| Frontend work that did not finish | See section 5. |
+| Browser testing | No browser or Playwright on this machine. Interaction, animation and layout checks are by code reading only. |
+| Docker stack and the Caddy proxy | Docker Desktop was not running. Compose was validated with `docker compose config` only. |
+| Server-rendered static sections (P3) | Not assigned to the UX pass. Pages are still client components. |
+| Lighthouse and real user timing | Needs a browser. |
 | Running about 25 named skills one by one (`fastapi-*`, `python-*`, `backend-*`, and others) | Not run as separate passes. Their practices were applied directly: async handlers, typed validation, small modules, tests, one error path. Structured logging, request ids and metrics (python-observability) are not added. |
 | `implementing-threat-intelligence-lifecycle-management` | Not applicable to an app of this size. The closest equivalent is in CI: weekly `pip-audit`, `npm audit`, `trivy` and Dependabot. |
 | Product Owner, Tech Lead, Red Team, Blue Team and QA agents | Those agent types are written for a different product (PropAgentAI). I did not run them here. The role checks were done as part of my own review. |
@@ -110,7 +180,9 @@ Format: location, what to cut, what replaces it. Line numbers are in the files a
 - `main.py:L138: shrink: _rejected() used twice. raise HTTPException(e.status, e.detail) inline.`
 - `engine.py:L385: shrink: per-account session pruning loop. Keep only the last 20 in a deque.`
 
-net: -25 lines possible. Every one is a simplification, not a safety control, so none was applied under the time pressure.
+net: -25 lines possible in the backend. Every one is a simplification, not a safety control, so none was applied under the time pressure.
+
+The frontend was not reviewed line by line with this lens. For the next pass: `ZoneSheet.tsx` is about 630 lines and `lib/app.tsx` about 480. The hand-written spring and gesture code was chosen to avoid a dependency, and it is the first place to look for cuts.
 
 ## 9. Memory I hold about this project
 
@@ -123,13 +195,13 @@ net: -25 lines possible. Every one is a simplification, not a safety control, so
 cd backend && .venv/bin/python -m pytest -q          # 27 security tests
 cd backend && .venv/bin/python -m bandit -r app -q
 cd backend && .venv/bin/python -m pip_audit -r requirements.txt
-cd frontend && npx tsc --noEmit && npm run build
-docker compose up --build                             # frontend on http://127.0.0.1:3200
+cd frontend && npx tsc --noEmit && npm run build && npm audit
+docker compose up --build                             # whole app on http://127.0.0.1:3200 (not run in this session)
 ```
 
 ## 11. What to do next
 
-1. Review the pull request and the frontend section of this report.
+1. Run `docker compose up --build` and open http://127.0.0.1:3200 in a browser. Try the sheet by touch, keyboard only, right-to-left and left-to-right, with reduced motion on.
 2. Before real money: real authentication, a payment provider, a database and transactions.
 3. Add structured logging and request ids.
 4. Build the PWA install flow, then the APK and IPA with Capacitor.

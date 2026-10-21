@@ -1,0 +1,27 @@
+# Single public entry point: browser -> this proxy -> frontend (pages) or backend (/api, /ws).
+# Why a proxy and not only Next rewrites: Next's rewrite hop forwards a client-supplied
+# X-Forwarded-For untouched, which would let a visitor pick their own rate-limit identity.
+# Caddy replaces that header with the real peer address, and the backend trusts only this container.
+{
+	admin off
+	auto_https off
+	# trusted_proxies is deliberately unset: with none configured Caddy ignores any
+	# X-Forwarded-For a client sends. If another proxy (TLS terminator, CDN) fronts this one,
+	# trust only that proxy:   servers { trusted_proxies static <its-ip-or-cidr> }
+}
+
+:8080 {
+	encode zstd gzip
+
+	@backend path /api/* /ws/*
+	handle @backend {
+		request_body {
+			max_size 8KB
+		}
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

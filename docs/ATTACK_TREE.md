@@ -17,12 +17,18 @@ GOAL: free parking / manipulated prices
 |    +-- 2.2 Guess a session id and stop it ........... original: OPEN (B4)   now: CLOSED (96-bit ids, owner check, 404 for others)
 |    +-- 2.3 Read all plates from the session list .... original: OPEN (B3)   now: CLOSED (own sessions only)
 |    +-- 2.4 Steal a token from the browser
-|         +-- AND 2.4.1 run script on the page ........ now: needs XSS; CSP + no HTML rendering of plates (frontend pass)
+|         +-- AND 2.4.1 run script on the page ........ now: needs XSS; React escapes plates, server refuses markup in plates, CSP set (script-src keeps 'unsafe-inline', so CSP alone will not stop it)
 |         +-- AND 2.4.2 read localStorage ............. residual: token is the only credential (anonymous demo account)
 |
 +-- OR 3. Distort demand-responsive prices
 |    +-- 3.1 Mass-create sessions to fill a zone ...... original: OPEN (B7)   now: CLOSED (sessions do not move sensor occupancy; 3 active per account)
 |    +-- 3.2 Mint many accounts to bypass the cap ..... now: LIMITED (identity: 10/min per client, burst 5; 10,000-account LRU)
+|    +-- 3.2b Forge the client address to get fresh limits
+|         +-- original design (Next rewrite hop only): OPEN. Next forwards a client-sent X-Forwarded-For untouched,
+|         |   and the backend trusts that hop. Found by independent review, confirmed in Next's proxy code.
+|         +-- now: CLOSED by design. Caddy is the only public entry, replaces X-Forwarded-For with the real peer,
+|             and the backend trusts only the proxy's fixed address. Parsing logic verified with uvicorn directly;
+|             the container stack itself was not run (Docker was not available).
 |    +-- 3.3 Tamper with sensor data .................. out of scope here (no sensor ingestion API exists)
 |
 +-- OR 4. Take the service down
@@ -35,8 +41,8 @@ GOAL: free parking / manipulated prices
 |
 +-- OR 5. Attack the visitor's browser
 |    +-- 5.1 Call the API from a hostile site ......... original: OPEN (B5)   now: CLOSED (origin allow-list)
-|    +-- 5.2 Clickjack the pay button ................. frontend pass (frame-ancestors, X-Frame-Options)
-|    +-- 5.3 Poison the service-worker cache .......... frontend pass (same-origin ok-only caching)
+|    +-- 5.2 Clickjack the pay button ................. CLOSED (frame-ancestors 'none' + X-Frame-Options DENY, verified in response headers)
+|    +-- 5.3 Poison the service-worker cache .......... CLOSED by design (200, same-origin, non-redirected responses only; never /api, /ws or Authorization), not tested in a browser
 |
 +-- OR 6. Supply chain and runtime
      +-- 6.1 Exploit a known CVE in a dependency ....... CI runs pip-audit, npm audit and trivy weekly and on every PR
@@ -51,4 +57,7 @@ GOAL: free parking / manipulated prices
 | State is in memory, one process | MVP simulation | Database, and transactions instead of the event-loop guarantee, before running more than one worker |
 | Rate limits are per process | Same | Shared store such as Redis when scaling out |
 | WebSocket does not check Origin | Feed is public open data with no credentials | Add an Origin check if the feed ever carries private data |
-| Swagger docs are public | Open-data goal | `PH_DOCS=0` turns them off |
+| Swagger docs are public on the backend | Open-data goal | `PH_DOCS=0` turns them off. The proxy does not expose `/docs`. |
+| CSP keeps `script-src 'unsafe-inline'` | Static pages and Next's inline scripts; a nonce would force per-request rendering | Nonce-based CSP via middleware if XSS risk grows |
+| Token lives in `localStorage` | Anonymous demo account, no cookies | HttpOnly cookie session with real accounts |
+| Proxy and containers were not run in this session | Docker Desktop was not available | Run `docker compose up --build` and the checks in `LAST_Report.md` section 10 |

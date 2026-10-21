@@ -9,3 +9,7 @@ Docs
 .pytest_cache/
 graphify-out/cache/
 graphify-out/graph.html
+
+*.tsbuildinfo
+graphify-out/.graphify_*
+graphify-out/20*/

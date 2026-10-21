@@ -19,6 +19,20 @@
   --glow-2: rgba(107, 91, 255, 0.28);
   --glow-3: rgba(255, 184, 0, 0.20);
   --shadow: 0 1px 2px rgba(10,15,30,.05), 0 12px 32px -12px rgba(10,15,30,.18);
+  --scrim: rgba(0, 0, 0, 0.45);
+  /* Text/icon colour on an --accent background. */
+  --on-accent: #04140f;
+
+  /* Size-specific tracking (Apple): tight at display sizes, neutral for text. Persian is forced to 0 below. */
+  --tracking-display: -0.02em;
+  --tracking-title: -0.015em;
+  --tracking-body: 0;
+
+  /* Latin: Inter. Persian: Vazirmatn. Both variables come from next/font on <html>; the literal
+     names are the fallback if the variable is not defined. */
+  --ff-latin: var(--font-inter, "Inter"), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ff-fa: var(--font-vazir, "Vazirmatn"), var(--font-inter, "Inter"), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
   color-scheme: light;
 }
 
@@ -40,6 +54,7 @@ html.dark {
   --glow-2: rgba(120, 90, 255, 0.34);
   --glow-3: rgba(255, 170, 60, 0.20);
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 24px 60px -24px rgba(0,0,0,.85);
+  --scrim: rgba(0, 0, 0, 0.55);
   color-scheme: dark;
 }
 
@@ -54,8 +69,8 @@ html.dark {
   --color-violet: var(--violet);
   --color-amber: var(--amber);
   --color-rose: var(--rose);
-  --font-sans: "Inter", "Vazirmatn", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-fa: "Vazirmatn", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter, "Inter"), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-fa: var(--font-vazir, "Vazirmatn"), var(--font-inter, "Inter"), ui-sans-serif, system-ui, sans-serif;
 }
 
 * { -webkit-tap-highlight-color: transparent; }
@@ -65,39 +80,38 @@ html { scroll-behavior: smooth; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-sans);
+  font-family: var(--ff-latin);
+  letter-spacing: var(--tracking-body);
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
   transition: background-color .4s ease, color .4s ease;
 }
 
-html[lang="fa"] body { font-family: var(--font-fa); letter-spacing: 0; }
+html:lang(fa) body { font-family: var(--ff-fa); }
 
 ::selection { background: var(--accent); color: #04140f; }
 
-/* ---------- aurora backdrop ---------- */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field:focus-visible { outline: none; }
+
+/* ---------- aurora backdrop ----------
+   Static: three soft radial gradients on one fixed layer. No blur filter and no animation, so
+   it is rasterised once and costs nothing per frame (kind to low-end phones). */
 .aurora {
   position: fixed;
-  inset: -30vh -20vw;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
-  filter: blur(70px);
-  opacity: .9;
+  background:
+    radial-gradient(52vw 52vw at 22% 24%, var(--glow-1), transparent 65%),
+    radial-gradient(46vw 46vw at 84% 40%, var(--glow-2), transparent 65%),
+    radial-gradient(40vw 40vw at 50% 96%, var(--glow-3), transparent 68%);
 }
-.aurora span {
-  position: absolute;
-  border-radius: 999px;
-  mix-blend-mode: normal;
-  animation: drift 26s ease-in-out infinite alternate;
-}
-.aurora span:nth-child(1) { width: 52vw; height: 52vw; left: 4%;  top: 6%;  background: radial-gradient(circle at 30% 30%, var(--glow-1), transparent 65%); }
-.aurora span:nth-child(2) { width: 46vw; height: 46vw; right: 2%; top: 22%; background: radial-gradient(circle at 60% 40%, var(--glow-2), transparent 65%); animation-delay: -8s; }
-.aurora span:nth-child(3) { width: 40vw; height: 40vw; left: 30%; bottom: 2%; background: radial-gradient(circle at 50% 50%, var(--glow-3), transparent 68%); animation-delay: -15s; }
-@keyframes drift {
-  0%   { transform: translate3d(0,0,0) scale(1); }
-  50%  { transform: translate3d(4vw, -5vh, 0) scale(1.12); }
-  100% { transform: translate3d(-3vw, 4vh, 0) scale(.95); }
-}
+.aurora span { display: none; }
+
+/* ---------- typography ---------- */
+.t-display { letter-spacing: var(--tracking-display); line-height: 1.05; }
+.t-title { letter-spacing: var(--tracking-title); line-height: 1.15; }
 
 /* ---------- primitives ---------- */
 .glass {
@@ -114,14 +128,24 @@ html[lang="fa"] body { font-family: var(--font-fa); letter-spacing: 0; }
   display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
   border-radius: 999px; font-weight: 600; font-size: .9rem;
   padding: .7rem 1.25rem; border: 1px solid transparent;
-  transition: transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s, background .22s, color .22s, border-color .22s;
+  transition: transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s, background-color .22s, color .22s, border-color .22s, opacity .22s;
   cursor: pointer; white-space: nowrap;
+  touch-action: manipulation;
+  user-select: none; -webkit-user-select: none;
 }
-.btn:active { transform: scale(.96); }
-.btn-primary { background: var(--accent); color: #04140f; box-shadow: 0 8px 26px -8px var(--accent); }
-.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 14px 34px -10px var(--accent); }
-.btn-ghost { background: var(--surface); border-color: var(--border); color: var(--text); backdrop-filter: blur(14px); }
-.btn-ghost:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+.btn:disabled { cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: var(--on-accent); box-shadow: 0 8px 26px -8px var(--accent); }
+.btn-ghost { background: var(--surface); border-color: var(--border); color: var(--text); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+
+/* Hover lift only on devices that can hover, so touch screens never get a stuck hover state. */
+@media (hover: hover) {
+  .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 14px 34px -10px var(--accent); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--border-strong); transform: translateY(-2px); }
+}
+
+/* Press feedback fires on pointer-down. Declared after the hover rules (same specificity) so it
+   wins while the button is both hovered and pressed. */
+.btn:active:not(:disabled) { transform: scale(.97); transition-duration: .1s; }
 
 .chip {
   display: inline-flex; align-items: center; gap: .4rem;
@@ -137,9 +161,39 @@ html[lang="fa"] body { font-family: var(--font-fa); letter-spacing: 0; }
   font-size: .95rem;
 }
 .field:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.field[aria-invalid="true"] { border-color: var(--rose); }
+.field[aria-invalid="true"]:focus { box-shadow: 0 0 0 4px color-mix(in srgb, var(--rose) 18%, transparent); }
 .field::placeholder { color: var(--muted); }
 
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* Progress fills scale instead of resizing, so a live update never triggers layout. */
+.bar-fill { transform-origin: 0 50%; transition: transform 1s cubic-bezier(.2,.8,.2,1); }
+html[dir="rtl"] .bar-fill { transform-origin: 100% 50%; }
+
+/* ---------- scroll-edge fade ----------
+   Replaces a hard border under sticky bars: a soft gradient that only appears once content has
+   scrolled underneath. Place as the first child of a sticky/positioned bar. */
+.scroll-edge {
+  position: absolute; inset-inline: 0; top: 0; height: calc(100% + 22px);
+  z-index: -1; pointer-events: none;
+  background: linear-gradient(to bottom, var(--bg) 35%, transparent);
+  opacity: 0; transition: opacity .25s ease;
+}
+.scroll-edge[data-on="true"] { opacity: .9; }
+
+/* Same fade, hanging below a sticky bar inside a scroller (the zone sheet header). */
+.scroll-edge-below {
+  position: absolute; inset-inline: 0; top: 100%; height: 18px;
+  pointer-events: none;
+  background: linear-gradient(var(--surface-solid), transparent);
+  opacity: 0; transition: opacity .25s;
+}
+.scroll-edge-below[data-on="true"] { opacity: .9; }
+
+/* ---------- map ---------- */
+@keyframes zone-pulse { 0%, 100% { transform: scale(.72); } 50% { transform: scale(1.1); } }
+.zone-pulse { transform-box: fill-box; transform-origin: center; animation: zone-pulse 3.6s ease-in-out infinite; }
 
 /* ---------- motion ---------- */
 .reveal { opacity: 0; transform: translateY(22px); }
@@ -158,11 +212,65 @@ html[lang="fa"] body { font-family: var(--font-fa); letter-spacing: 0; }
 .grow-in { animation: growIn .5s cubic-bezier(.2,.9,.25,1.05) both; }
 @keyframes growIn { from { opacity: 0; transform: translateY(14px) scale(.98);} to { opacity:1; transform:none; } }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::after, *::before { animation: none !important; transition-duration: .01ms !important; }
-  .reveal { opacity: 1; transform: none; }
-}
-
 /* scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+
+/* ---------- accessibility preferences ---------- */
+
+/* Reduced motion: no animation, instant transitions. (The zone sheet checks the same query in
+   JS and cross-fades with the Web Animations API instead of springing.) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::after, *::before { animation: none !important; transition-duration: .01ms !important; }
+  html { scroll-behavior: auto; }
+  .reveal { opacity: 1; transform: none; }
+  .btn:active:not(:disabled) { transform: none; }
+}
+
+/* Reduced transparency: solid surfaces, no backdrop blur anywhere. */
+@media (prefers-reduced-transparency: reduce) {
+  :root { --surface: var(--surface-solid); --scrim: rgba(0, 0, 0, 0.7); }
+  html.dark { --surface: var(--surface-solid); }
+  /* A hairline instead of a translucent fade. */
+  .scroll-edge-below { height: 1px; background: var(--border); }
+  .aurora { opacity: .55; }
+  *, *::before, *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+/* Increased contrast: near-solid surfaces, stronger borders, darker/lighter muted text. */
+@media (prefers-contrast: more) {
+  :root {
+    --surface: rgba(255, 255, 255, 0.96);
+    --border: rgba(10, 15, 30, 0.42);
+    --border-strong: rgba(10, 15, 30, 0.72);
+    --muted: #2f374b;
+    --accent: #007757;
+    --accent-soft: rgba(0, 119, 87, 0.16);
+    --amber: #8a5900;
+    --rose: #b3002f;
+    --violet: #4a3bd6;
+    --scrim: rgba(0, 0, 0, 0.6);
+  }
+  html.dark {
+    --surface: rgba(13, 18, 32, 0.97);
+    --border: rgba(255, 255, 255, 0.5);
+    --border-strong: rgba(255, 255, 255, 0.82);
+    --muted: #d3dbee;
+    --accent: #5dffc4;
+    --accent-soft: rgba(93, 255, 196, 0.18);
+    --amber: #ffd57a;
+    --rose: #ff8fa6;
+    --violet: #c2b6ff;
+    --scrim: rgba(0, 0, 0, 0.75);
+  }
+  :root:not(.dark) { --on-accent: #fff; }
+  .aurora { opacity: .35; }
+  .chip, .glass, .field, .btn-ghost { border-width: 1.5px; }
+}
+
+/* Persian: letter-spacing is always 0 (tracking breaks Arabic-script joining). Kept last and at
+   higher specificity than utility classes, so it also overrides tracking-* and .chip. */
+html:lang(fa), html:lang(fa) *, html:lang(fa) *::before, html:lang(fa) *::after { letter-spacing: 0; }
