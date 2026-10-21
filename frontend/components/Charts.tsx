@@ -23,7 +23,7 @@ export function Spark({
     })
     .join(" ");
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height }} role="img">
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height }} aria-hidden>
       <defs>
         <linearGradient id={`g${id}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.35" />
@@ -48,9 +48,9 @@ export function Bars({
       {data.map((v, i) => (
         <div key={i} className="group relative flex-1 flex flex-col justify-end h-full">
           <div
-            className="rounded-t-[4px] transition-all duration-700"
+            className="h-full origin-bottom rounded-t-[4px] transition-[transform,opacity] duration-700"
             style={{
-              height: `${(v / max) * 100}%`,
+              transform: `scaleY(${Math.min(1, Math.max(0, v / max))})`,
               background: i === highlight ? "var(--accent)" : color,
               opacity: i === highlight ? 1 : 0.42 + (v / max) * 0.5,
             }}

@@ -1,9 +1,19 @@
 "use client";
-import { useApp } from "@/lib/app";
+import { useLive, useLiveActions, usePolling, usePrefs } from "@/lib/app";
 import { fmt, pct } from "@/lib/i18n";
 
+/* Looks the zone name up on its own, so the section does not subscribe to every zone frame. */
+function ZoneName({ id }: { id: string }) {
+  const { lang } = usePrefs();
+  const name = useLive((s) => s.zones.find((z) => z.id === id)?.name);
+  return <>{name ? name[lang] : id}</>;
+}
+
 export default function Pricing() {
-  const { t, lang, events, zones } = useApp();
+  const { t, lang } = usePrefs();
+  const events = useLive((s) => s.events);
+  const { refreshEvents } = useLiveActions();
+  usePolling(refreshEvents, 30_000); // starts_in_min / active are not in socket frames
   const rules = [
     { icon: "↑", text: t.pricing.up, color: "var(--rose)" },
     { icon: "=", text: t.pricing.hold, color: "var(--accent)" },
@@ -14,7 +24,7 @@ export default function Pricing() {
     <section id="pricing" className="mx-auto max-w-[1180px] px-4 py-10 sm:py-16">
       <div className="reveal grid gap-6 lg:grid-cols-[1.05fr_.95fr]">
         <div className="glass card relative overflow-hidden p-6 sm:p-8">
-          <h2 className="text-[clamp(1.6rem,4.5vw,2.4rem)] font-extrabold tracking-[-0.02em]">{t.pricing.title}</h2>
+          <h2 className="t-title text-[clamp(1.6rem,4.5vw,2.4rem)] font-extrabold">{t.pricing.title}</h2>
           <p className="mt-3 max-w-[54ch] text-sm leading-relaxed text-[var(--muted)] sm:text-[15px]">{t.pricing.lead}</p>
 
           <div className="mt-6 grid gap-2.5">
@@ -22,7 +32,7 @@ export default function Pricing() {
               <div key={i} className="flex items-center gap-3 rounded-[18px] border p-3.5 hairline"
                 style={{ background: "var(--surface)" }}>
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-bold"
-                  style={{ background: "var(--accent-soft)", color: r.color }}>{r.icon}</span>
+                  style={{ background: "var(--accent-soft)", color: r.color }} aria-hidden>{r.icon}</span>
                 <span className="text-[13px] font-medium leading-snug">{r.text}</span>
               </div>
             ))}
@@ -44,27 +54,24 @@ export default function Pricing() {
           <h3 className="text-lg font-extrabold">{t.pricing.event}</h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">{t.pricing.eventLead}</p>
           <ul className="mt-5 grid gap-3">
-            {events.map((e) => {
-              const z = zones.find((x) => x.id === e.zone_id);
-              return (
-                <li key={e.id} className="rounded-[18px] border p-4 hairline" style={{ background: "var(--surface)" }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="text-[13px] font-semibold leading-snug">{e.title[lang]}</span>
-                    <span className="chip num shrink-0" style={{ color: "var(--amber)", borderColor: "var(--amber)" }}>
-                      ×{e.multiplier}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--muted)] num">
-                    <span>{z ? z.name[lang] : e.zone_id}</span>
-                    <span>
-                      {e.active
-                        ? t.pricing.running
-                        : `${fmt(Math.max(0, e.starts_in_min ?? 0), lang)} ${t.pricing.soon}`}
-                    </span>
-                  </div>
-                </li>
-              );
-            })}
+            {events.map((e) => (
+              <li key={e.id} className="rounded-[18px] border p-4 hairline" style={{ background: "var(--surface)" }}>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[13px] font-semibold leading-snug">{e.title[lang]}</span>
+                  <span className="chip num shrink-0" style={{ color: "var(--amber)", borderColor: "var(--amber)" }}>
+                    ×{e.multiplier}
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--muted)] num">
+                  <span><ZoneName id={e.zone_id} /></span>
+                  <span>
+                    {e.active
+                      ? t.pricing.running
+                      : `${fmt(Math.max(0, e.starts_in_min ?? 0), lang)} ${t.pricing.soon}`}
+                  </span>
+                </div>
+              </li>
+            ))}
           </ul>
         </div>
       </div>

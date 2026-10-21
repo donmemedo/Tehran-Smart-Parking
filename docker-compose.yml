@@ -1,12 +1,36 @@
+# Topology: browser -> proxy:8080 -> frontend:3000 (pages) or backend:8000 (/api, /ws).
+# Only the proxy is published, on loopback. For real use put TLS in front of it (or give Caddy a
+# domain name in proxy/Caddyfile) and keep every other service on the private network.
 services:
   backend:
     build: ./backend
     container_name: sfpark-backend
     restart: unless-stopped
-    ports:
-      - "8090:8000"
+    # Not published to the host: only the frontend container can reach it.
+    expose:
+      - "8000"
+    # Debugging only (loopback, never 0.0.0.0): uncomment to reach the API and /docs directly.
+    # ports:
+    #   - "127.0.0.1:8090:8000"
     environment:
-      - TZ=Asia/Tehran
+      TZ: Asia/Tehran
+      PH_ALLOWED_ORIGINS: ${PH_ALLOWED_ORIGINS:-http://localhost:3200,http://127.0.0.1:3200}
+      PH_ALLOWED_HOSTS: ${PH_ALLOWED_HOSTS:-backend,localhost,127.0.0.1}
+      PH_DEMO_TOPUP: ${PH_DEMO_TOPUP:-0}
+      PH_RATE_LIMIT_PER_MIN: ${PH_RATE_LIMIT_PER_MIN:-240}
+      # Only the proxy may vouch for a client address, so nobody can forge X-Forwarded-For to
+      # dodge the rate limits. Never set this to "*".
+      FORWARDED_ALLOW_IPS: ${PH_PROXY_IP:-10.89.28.2}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 200
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 20s
@@ -17,13 +41,77 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8090}
+        # rewrites()/headers() are baked in at build time, so these are build args too.
+        BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+        # 1 adds upgrade-insecure-requests (needs HTTPS). Local plain-HTTP use needs 0 or Safari
+        # rewrites same-origin requests to https and the app breaks.
+        CSP_UPGRADE_INSECURE: ${CSP_UPGRADE_INSECURE:-0}
     container_name: sfpark-frontend
     restart: unless-stopped
-    ports:
-      - "3200:3000"
+    # Not published: reached only through the proxy.
+    expose:
+      - "3000"
     environment:
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}
-      - TZ=Asia/Tehran
+      TZ: Asia/Tehran
+      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+    read_only: true
+    tmpfs:
+      - /tmp
+      # Next may write its runtime cache here; keep it off the read-only image layer.
+      - /app/.next/cache:uid=1001,gid=1001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 200
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+
+  proxy:
+    image: caddy:2.8-alpine
+    container_name: sfpark-proxy
+    restart: unless-stopped
+    user: "65534:65534"
+    ports:
+      - "127.0.0.1:3200:8080"
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      default:
+        ipv4_address: ${PH_PROXY_IP:-10.89.28.2}
+    read_only: true
+    tmpfs:
+      - /data:uid=65534,gid=65534
+      - /config:uid=65534,gid=65534
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 64m
+    cpus: 0.5
+    pids_limit: 100
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${PH_SUBNET:-10.89.28.0/24}
